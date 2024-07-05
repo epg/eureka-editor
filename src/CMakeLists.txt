@@ -2,13 +2,11 @@
 configure_file(version.h.in version.h)
 
 set(source_base
+    dehconsts.h
     Document.cc
     Document.h
     DocumentModule.cc
     DocumentModule.h
-    Errors.cc
-    Errors.h
-    FixedPoint.h
     hdr_fltk.h
     Instance.cc
     Instance.h
@@ -17,8 +15,6 @@ set(source_base
     main.cc
     main.h
     objid.h
-    SafeOutFile.cc
-    SafeOutFile.h
     Sector.cc
     Sector.h
     Side.h
@@ -79,19 +75,11 @@ set(source_im
 )
 
 set(source_lib
-    lib_adler.cc
-    lib_adler.h
-    lib_file.cc
-    lib_file.h
     lib_tga.cc
     lib_tga.h
-    lib_util.cc
-    lib_util.h
 )
 
 set(source_m
-    m_bitvec.cc
-    m_bitvec.h
     m_config.cc
     m_config.h
     m_editlump.cc
@@ -107,18 +95,11 @@ set(source_m
     m_loadsave.h
     m_nodes.cc
     m_nodes.h
-    m_parse.cc
-    m_parse.h
     m_select.cc
     m_select.h
-    m_streams.cc
-    m_streams.h
-    m_strings.cc
-    m_strings.h
     m_testmap.cc
+    m_testmap.h
     m_udmf.cc
-    m_vector.cc
-    m_vector.h
 )
 
 set(source_r
@@ -130,14 +111,6 @@ set(source_r
     r_software.cc
     r_subdiv.cc
     r_subdiv.h
-)
-
-set(source_sys
-    sys_debug.cc
-    sys_debug.h
-    sys_endian.h
-    sys_macro.h
-    sys_type.h
 )
 
 set(source_ui
@@ -191,6 +164,8 @@ set(source_ui
 )
 
 set(source_w
+    w_dehacked.cc
+    w_dehacked.h
     w_loadpic.cc
     w_loadpic.h
     w_rawdef.h
@@ -209,20 +184,51 @@ add_library(
     ${source_lib}
     ${source_m}
     ${source_r}
-    ${source_sys}
     ${source_thirdparty}
     ${source_ui}
     ${source_w}
 )
 
+add_library(
+    eurekacore STATIC
+    Errors.cc
+    Errors.h
+    filesystem.hpp
+    FixedPoint.h
+    lib_adler.cc
+    lib_adler.h
+    lib_file.cc
+    lib_file.h
+    lib_util.cc
+    lib_util.h
+    m_bitvec.cc
+    m_bitvec.h
+    m_strings.cc
+    m_strings.h
+    m_parse.cc
+    m_parse.h
+    m_streams.cc
+    m_streams.h
+    m_vector.cc
+    m_vector.h
+    PrintfMacros.h
+    SafeOutFile.cc
+    SafeOutFile.h
+    sys_debug.cc
+    sys_debug.h
+    sys_endian.h
+    sys_macro.h
+    sys_type.h
+    WindowsSanitization.h
+)
+
+target_link_libraries(eurekasrc PRIVATE eurekacore)
+
 # Needed for macOS release archiving!
-set_target_properties(eurekasrc PROPERTIES ARCHIVE_OUTPUT_DIRECTORY
+set_target_properties(eurekasrc eurekacore PROPERTIES ARCHIVE_OUTPUT_DIRECTORY
                       ${PROJECT_BINARY_DIR}/out/library)
 
 option(ENABLE_OPENGL "Use OpenGL instead of software rendering" ON)
-
-# TODO: remove this when everything is moved to CMake
-target_compile_definitions(eurekasrc PUBLIC BUILT_VIA_CMAKE)
 
 if(ENABLE_OPENGL)
     find_package(OpenGL REQUIRED)
@@ -269,6 +275,7 @@ if(APPLE OR WIN32)
         message(STATUS "Building ${LOCAL_FLTK_SOURCE}")
 
         set(LOCAL_FLTK_DEFS -D CMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+                            -D CMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                             -D CMAKE_BUILD_TYPE=Release
                             -D OPTION_USE_SYSTEM_LIBJPEG=OFF -D OPTION_USE_SYSTEM_LIBPNG=OFF
                             -D OPTION_USE_SYSTEM_ZLIB=OFF
@@ -368,7 +375,6 @@ source_group("im_ source" FILES ${source_im})
 source_group("lib_ source" FILES ${source_lib})
 source_group("m_ source" FILES ${source_m})
 source_group("r_ source" FILES ${source_r})
-source_group("sys_ source" FILES ${source_sys})
 source_group("ui_ source" FILES ${source_ui})
 source_group("w_ source" FILES ${source_w})
 source_group("third-party" FILES ${source_thirdparty})

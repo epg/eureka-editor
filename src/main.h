@@ -30,11 +30,7 @@
 
 #define EUREKA_TITLE  "Eureka DOOM Editor"
 
-#ifdef BUILT_VIA_CMAKE
 #include "version.h"
-#else
-#define EUREKA_VERSION "2.0.0"
-#endif
 
 #define EUREKA_LUMP  "__EUREKA"
 
@@ -144,8 +140,8 @@ namespace global
 
 namespace global
 {
-	extern int   show_help;		// Print usage message and exit.
-	extern int   show_version;	// Print version info and exit.
+	extern bool   show_help;		// Print usage message and exit.
+	extern bool   show_version;	// Print version info and exit.
 }
 
 

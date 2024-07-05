@@ -178,7 +178,7 @@ void Instance::UpdateDrawLine()
 
 	v2double_t newpos = edit.map.xy;
 
-	if (grid.ratio > 0)
+	if (grid.getRatio() > 0)
 	{
 		grid.RatioSnapXY(newpos, V->xy());
 	}
@@ -198,7 +198,7 @@ void Instance::UpdateDrawLine()
 	edit.drawLine.to = newpos;
 
 	// when drawing mode, highlight a vertex at the snap position
-	if (grid.snap && edit.highlight.is_nil() && edit.split_line.is_nil())
+	if (grid.snaps() && edit.highlight.is_nil() && edit.split_line.is_nil())
 	{
 		int near_vert = level.vertmod.findExact(FFixedPoint(newpos.x), FFixedPoint(newpos.y));
 		if (near_vert >= 0)
@@ -271,7 +271,7 @@ void Instance::UpdateHighlight()
 
 		// if drawing a line and ratio lock is ON, only highlight a
 		// vertex if it is *exactly* the right ratio.
-		if (grid.ratio > 0 && edit.action == EditorAction::drawLine &&
+		if (grid.getRatio() > 0 && edit.action == EditorAction::drawLine &&
 			edit.mode == ObjType::vertices && edit.highlight.valid())
 		{
 			const auto V = level.vertices[edit.highlight.num];

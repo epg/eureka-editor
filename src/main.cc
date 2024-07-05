@@ -37,6 +37,7 @@
 #include "m_game.h"
 #include "m_files.h"
 #include "m_loadsave.h"
+#include "m_testmap.h"
 
 #include "e_main.h"
 #include "m_events.h"
@@ -44,6 +45,7 @@
 #include "r_render.h"
 #include "r_subdiv.h"
 
+#include "w_dehacked.h"
 #include "w_rawdef.h"
 #include "w_texture.h"
 #include "w_wad.h"
@@ -70,6 +72,11 @@
 // IOANCH: be able to call OSX specific routines (needed for ~/Library)
 #ifdef __APPLE__
 #include "OSXCalls.h"
+#include <signal.h>
+#elif defined(_WIN32)
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
 #endif
 
 
@@ -79,6 +86,14 @@
 
 bool global::want_quit = false;
 bool global::app_has_focus = false;
+
+namespace signalling
+{
+#ifndef _WIN32
+	static bool hasChildProcessStatus;
+	static int childProcessStatus;
+#endif
+}
 
 fs::path global::config_file;
 fs::path global::log_file;
@@ -120,8 +135,8 @@ enum class ProgressStatus
 };
 static ProgressStatus init_progress;
 
-int global::show_help     = 0;
-int global::show_version  = 0;
+bool global::show_help;
+bool global::show_version;
 
 
 static void RemoveSingleNewlines(SString &buffer)
@@ -449,6 +464,8 @@ static void DeterminePort(Instance &inst)
 	}
 
 	inst.loaded.portName = config::default_port;
+	if(inst.main_win)
+		testmap::updateMenuName(inst.main_win->menu_bar, inst.loaded);
 }
 
 
@@ -515,7 +532,7 @@ int Main_key_handler(int event)
 	if (Fl::event_key() == FL_Escape)
 	{
 		// TODO: use the currently active instance instead
-		gInstance.EV_EscapeKey();
+		gInstance->EV_EscapeKey();
 		return 1;
 	}
 
@@ -528,13 +545,13 @@ int Main_key_handler(int event)
 int x11_check_focus_change(void *xevent, void *data)
 {
 	// TODO: get multiple windows
-	if (gInstance.main_win != NULL)
+	if (gInstance->main_win != NULL)
 	{
 		const XEvent *xev = (const XEvent *)xevent;
 
 		Window xid = xev->xany.window;
 
-		if (fl_find(xid) == gInstance.main_win)
+		if (fl_find(xid) == gInstance->main_win)
 		{
 			switch (xev->type)
 			{
@@ -632,7 +649,7 @@ static void Main_OpenWindow(Instance &inst)
 	inst.main_win = new UI_MainWindow(inst);
 
 	// Set menu bindings now that we have them.
-	updateMenuBindings();
+	menu::updateBindings(inst.main_win->menu_bar);
 
 	inst.main_win->label("Eureka v" EUREKA_VERSION);
 
@@ -699,7 +716,7 @@ static void Main_OpenWindow(Instance &inst)
 	if (config::begin_maximized)
 		inst.main_win->Maximize();
 
-	log_viewer = new UI_LogViewer(gInstance);
+	log_viewer = new UI_LogViewer(*gInstance);
 
 	gLog.openWindow([](const SString &text, void *userData)
                     {
@@ -766,17 +783,46 @@ fs::path Instance::Main_FileOpFolder() const
 }
 
 
+static void updateStatusByChildProcesses(const Instance &inst)
+{
+#ifdef _WIN32
+#else
+	if(signalling::hasChildProcessStatus)
+	{
+		signalling::hasChildProcessStatus = false;
+		int status = signalling::childProcessStatus;
+
+		SString message;
+
+		if(WIFEXITED(status))
+		{
+			message = SString::printf("Exited with status %d", WEXITSTATUS(status));
+		}
+		else if(WIFSIGNALED(status))
+		{
+			message = SString::printf("Signalled by %d", WTERMSIG(status));
+		}
+		if(message.good())
+		{
+			inst.Status_Set("%s", message.c_str());
+			gLog.printf("--> %s\n", message.c_str());
+		}
+	}
+#endif
+}
+
+
 void Main_Loop()
 {
 	// TODO: must think this through
-	gInstance.RedrawMap();
+	gInstance->RedrawMap();
 
 	for (;;)
 	{
 		// TODO: determine the active instance
-		if (gInstance.edit.is_navigating)
+		if (gInstance->edit.is_navigating)
 		{
-			gInstance.Nav_Navigate();
+			gInstance->Nav_Navigate();
 
 			Fl::wait(0);
 
@@ -790,7 +836,7 @@ void Main_Loop()
 
 		if (global::want_quit)
 		{
-			if (gInstance.level.Main_ConfirmQuit("quit"))
+			if (gInstance->level.Main_ConfirmQuit("quit"))
 				break;
 
 			global::want_quit = false;
@@ -799,12 +845,14 @@ void Main_Loop()
 		// TODO: handle these in a better way
 
 		// TODO: HANDLE ALL INSTANCES
-		gInstance.main_win->UpdateTitle(gInstance.level.MadeChanges ? '*' : 0);
+		gInstance->main_win->UpdateTitle(gInstance->level.MadeChanges ? '*' : 0);
 
-		gInstance.main_win->scroll->UpdateBounds();
+		gInstance->main_win->scroll->UpdateBounds();
 
-		if (gInstance.edit.Selected->empty())
-			gInstance.edit.error_mode = false;
+		if (gInstance->edit.Selected->empty())
+			gInstance->edit.error_mode = false;
+
+		updateStatusByChildProcesses(*gInstance);
 	}
 }
 
@@ -887,10 +935,27 @@ NewResources loadResources(const LoadingData& loading, const WadData &waddata) n
 
 		for (const fs::path& resource : newres.loading.resourceList)
 		{
+			if(fs::is_directory(resource))
+			{
+				std::shared_ptr<Wad_file> wad = Wad_file::readFromDir(resource);
+				if(!wad)
+					gLog.printf("Failed opening directory: %s\n", resource.u8string().c_str());
+				else
+				{
+					resourceWads.push_back(wad);
+				}
+				continue;
+			}
 			if (MatchExtensionNoCase(resource, ".ugh"))
 			{
 				M_ParseDefinitionFile(parseVars, ParsePurpose::resource,
 					&newres.config, resource);
+				continue;
+			}
+			if(MatchExtensionNoCase(resource, ".deh") || MatchExtensionNoCase(resource, ".bex"))
+			{
+				if(!dehacked::loadFile(resource, newres.config))
+					gLog.printf("Error loading Dehacked file %s\n", resource.u8string().c_str());
 				continue;
 			}
 			// Otherwise wad
@@ -910,6 +975,7 @@ NewResources loadResources(const LoadingData& loading, const WadData &waddata) n
 			ThrowException("Could not load IWAD file");
 
 		newres.waddata.reloadResources(gameWad, newres.config, resourceWads);
+		dehacked::loadLumps(newres.waddata.master, newres.config);
 	}
 	catch (const std::runtime_error&e )
 	{
@@ -933,6 +999,8 @@ void Instance::Main_LoadResources(const LoadingData &loading) noexcept(false)
 	wad = std::move(newres.waddata);
 	conf = std::move(newres.config);
 	loaded = std::move(newres.loading);
+	if(main_win)
+		testmap::updateMenuName(main_win->menu_bar, loaded);
 	
 	UpdateViewOnResources();
 }
@@ -1040,14 +1108,52 @@ static void prepareConfigPath()
 	}
 }
 
+static void setupSignalHandlers()
+{
+#ifdef _WIN32
+#else
+	struct sigaction action = {};
+	action.sa_handler = [](int signalNumber)
+	{
+		int status;
+		pid_t pid;
+		while((pid = waitpid(-1, &status, WNOHANG)) > 0)
+		{
+			signalling::hasChildProcessStatus = true;
+			signalling::childProcessStatus = status;
+		}
+	};
+	action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	int r = sigaction(SIGCHLD, &action, nullptr);
+	if (r == -1)
+	{
+		ThrowException("Failed setting up process reaper signal handler: %s", 
+					   GetErrorMessage(errno).c_str());
+	}
+#endif
+}
+
 //
-//  the program starts here
+//  Common entry point, called by main or other handlers depending on system
 //
-int main(int argc, char *argv[])
+int EurekaMain(int argc, char *argv[])
 {
 	try
 	{
+		try
+		{
+			setupSignalHandlers();
+		}
+		catch(const std::runtime_error &e)
+		{
+			// non-critical error, may cause issues
+			gLog.printf("WARNING: %s\n", e.what());
+		}
+
 		init_progress = ProgressStatus::nothing;
+		
+		Instance instance;
+		gInstance = &instance;
 
 
 		// a quick pass through the command line arguments
@@ -1087,6 +1193,7 @@ int main(int argc, char *argv[])
 
 
 		// load all the config settings
+		config::preloading = gInstance->loaded;
 		prepareConfigPath();
 		M_ParseConfigFile(global::config_file, options);
 
@@ -1095,9 +1202,11 @@ int main(int argc, char *argv[])
 
 		// and command line arguments will override both
 		M_ParseCommandLine(argc - 1, argv + 1, CommandLinePass::normal, global::Pwad_list, options);
+		
+		gInstance->loaded = config::preloading;	// update state now
 
 		// TODO: create a new instance
-		gInstance.Editor_Init();
+		gInstance->Editor_Init();
 
 		Main_SetupFLTK();
 
@@ -1109,11 +1218,11 @@ int main(int argc, char *argv[])
 
 		global::recent.lookForIWADs(global::install_dir, global::home_dir);
 
-		Main_OpenWindow(gInstance);
+		Main_OpenWindow(*gInstance);
 
 		init_progress = ProgressStatus::window;
 
-		gInstance.M_LoadOperationMenus();
+		gInstance->M_LoadOperationMenus();
 
 
 		// open a specified PWAD now
@@ -1134,12 +1243,12 @@ int main(int argc, char *argv[])
 			
 			// Note: the Main_LoadResources() call will ensure this gets
 			//       placed at the correct spot (at the end)
-			gInstance.wad.master.ReplaceEditWad(editWad);
+			gInstance->wad.master.ReplaceEditWad(editWad);
 		}
 		// don't auto-load when --iwad or --warp was used on the command line
-		else if (config::auto_load_recent && ! (!gInstance.loaded.iwadName.empty() || !gInstance.loaded.levelName.empty()))
+		else if (config::auto_load_recent && ! (!gInstance->loaded.iwadName.empty() || !gInstance->loaded.levelName.empty()))
 		{
-			gInstance.M_TryOpenMostRecent();
+			gInstance->M_TryOpenMostRecent();
 		}
 
 
@@ -1150,12 +1259,12 @@ int main(int argc, char *argv[])
 		// Note: there is logic in M_ParseEurekaLump() to ensure that command
 		// line arguments can override the EUREKA_LUMP values.
 
-		if (gInstance.wad.master.editWad())
+		if (gInstance->wad.master.editWad())
 		{
-			if (! gInstance.loaded.parseEurekaLump(global::home_dir, global::install_dir, global::recent, gInstance.wad.master.editWad().get(), true /* keep_cmd_line_args */))
+			if (! gInstance->loaded.parseEurekaLump(global::home_dir, global::install_dir, global::recent, gInstance->wad.master.editWad().get(), true /* keep_cmd_line_args */))
 			{
 				// user cancelled the load
-				gInstance.wad.master.RemoveEditWad();
+				gInstance->wad.master.RemoveEditWad();
 			}
 		}
 
@@ -1163,31 +1272,32 @@ int main(int argc, char *argv[])
 		// determine which IWAD to use
 		// TODO: instance management
 		std::shared_ptr<Wad_file> gameWad;
-		if (! DetermineIWAD(gInstance))
+		if (! DetermineIWAD(*gInstance))
 			goto quit;
-		gameWad = Wad_file::Open(gInstance.loaded.iwadName, WadOpenMode::read);
+		gameWad = Wad_file::Open(gInstance->loaded.iwadName, WadOpenMode::read);
 		if(!gameWad)
 			goto quit;
 
-		DeterminePort(gInstance);
+		DeterminePort(*gInstance);
 
 		// temporarily load the iwad, the following few functions need it.
 		// it will get loaded again in Main_LoadResources().
 		// TODO: check result
-		gInstance.wad.master.setGameWad(gameWad);
+		gInstance->wad.master.setGameWad(gameWad);
+		gameWad.reset();
 
 		// load the initial level
 		// TODO: first instance
-		gInstance.loaded.levelName = DetermineLevel(gInstance);
+		gInstance->loaded.levelName = DetermineLevel(*gInstance);
 
-		gLog.printf("Loading initial map : %s\n", gInstance.loaded.levelName.c_str());
+		gLog.printf("Loading initial map : %s\n", gInstance->loaded.levelName.c_str());
 
 		// TODO: the first instance
-		gInstance.LoadLevel(gInstance.wad.master.activeWad().get(), gInstance.loaded.levelName);
+		gInstance->LoadLevel(gInstance->wad.master.activeWad().get(), gInstance->loaded.levelName);
 
 		// do this *after* loading the level, since config file parsing
 		// can depend on the map format and UDMF namespace.
-		gInstance.Main_LoadResources(gInstance.loaded);	// TODO: instance management
+		gInstance->Main_LoadResources(gInstance->loaded);	// TODO: instance management
 
 
 		Main_Loop();

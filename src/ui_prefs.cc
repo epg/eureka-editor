@@ -1479,11 +1479,8 @@ void UI_Preferences::LoadValues()
 	if (config::grid_style < 0 || config::grid_style > 1)
 		config::grid_style = 1;
 
-	if (config::grid_default_mode < 0 || config::grid_default_mode > 1)
-		config::grid_default_mode = 1;
-
 	grid_cur_style->value(config::grid_style);
-	grid_enabled->value(config::grid_default_mode);
+	grid_enabled->value(config::grid_default_mode ? 1 : 0);
 	grid_snap->value(config::grid_default_snap ? 1 : 0);
 	grid_size->value(GridSizeToChoice(config::grid_default_size));
 	grid_hide_free ->value(config::grid_hide_in_free_mode ? 1 : 0);
@@ -1581,7 +1578,7 @@ void UI_Preferences::SaveValues()
 		Fl::foreground(0, 0, 0);
 
 		// TODO: update for ALL windows
-		gInstance.main_win->redraw();
+		gInstance->main_win->redraw();
 	}
 	else if (config::gui_color_set == 2)
 	{
@@ -1593,7 +1590,7 @@ void UI_Preferences::SaveValues()
 						RGB_BLUE(config::gui_custom_fg));
 
 		// TODO: update for ALL windows
-		gInstance.main_win->redraw();
+		gInstance->main_win->redraw();
 	}
 
 	/* General Tab */
@@ -1626,7 +1623,7 @@ void UI_Preferences::SaveValues()
 		config::browser_combine_tex = new_combo;
 
 		// TODO: update for ALL windows
-		gInstance.main_win->browser->Populate();
+		gInstance->main_win->browser->Populate();
 	}
 
 	// decode the user ratio
@@ -1639,12 +1636,12 @@ void UI_Preferences::SaveValues()
 		std::swap(config::grid_ratio_low, config::grid_ratio_high);
 
 	// TODO: update for ALL windows
-	gInstance.main_win->info_bar->UpdateRatio();
+	gInstance->main_win->info_bar->UpdateRatio();
 
 	/* Grid Tab */
 
 	config::grid_style        = grid_cur_style->value();
-	config::grid_default_mode = grid_enabled->value();
+	config::grid_default_mode = !!grid_enabled->value();
 	config::grid_default_snap = grid_snap->value() ? true : false;
 	config::grid_default_size = atoi(grid_size->mvalue()->text);
 	config::grid_hide_in_free_mode = grid_hide_free ->value() ? true : false;

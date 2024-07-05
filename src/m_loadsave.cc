@@ -38,6 +38,7 @@
 #include "m_config.h"
 #include "m_files.h"
 #include "m_loadsave.h"
+#include "m_testmap.h"
 #include "r_subdiv.h"
 #include "Sector.h"
 #include "SideDef.h"
@@ -56,18 +57,6 @@ static const char overwrite_message[] =
 	"This operation will destroy that map (overwrite it)."
 	"\n\n"
 	"Are you sure you want to continue?";
-
-
-void MasterDir::RemoveEditWad()
-{
-	edit_wad.reset();
-}
-
-
-void MasterDir::ReplaceEditWad(const std::shared_ptr<Wad_file> &new_wad)
-{
-	edit_wad = new_wad;
-}
 
 static Document makeFreshDocument(Instance &inst, const ConfigData &config, MapFormat levelFormat)
 {
@@ -305,6 +294,9 @@ void Instance::CMD_NewProject()
 		level = makeFreshDocument(*this, newres.config, newres.loading.levelFormat);
 		conf = std::move(newres.config);
 		loaded = std::move(newres.loading);
+		if(main_win)
+			testmap::updateMenuName(main_win->menu_bar, loaded);
+		
 		this->wad = std::move(newres.waddata);
 		
 		SaveLevel(loaded, map_name, *wad, false);
@@ -321,6 +313,8 @@ void Instance::CMD_NewProject()
 		wad = std::move(backupWadData);
 		if(backupDoc)
 			level = std::move(backupDoc.value());
+		if(main_win)
+			testmap::updateMenuName(main_win->menu_bar, loaded);
 		
 		DLG_ShowError(false, "Could not create new project: %s", e.what());
 	}
@@ -341,6 +335,9 @@ bool Instance::MissingIWAD_Dialog()
 		const fs::path *iwad = global::recent.queryIWAD(loaded.gameName);
 		SYS_ASSERT(!!iwad);
 		loaded.iwadName = *iwad;
+		
+		if(main_win)
+			testmap::updateMenuName(main_win->menu_bar, loaded);
 	}
 
 	return result.has_value();
@@ -1016,6 +1013,8 @@ void Instance::LoadLevelNum(const Wad_file *wad, int lev_num) noexcept(false)
 	}
 	loaded = newdoc.loading;
 	level = std::move(newdoc.doc);
+	if(main_win)
+		testmap::updateMenuName(main_win->menu_bar, loaded);
 	Subdiv_InvalidateAll();
 }
 
@@ -1070,7 +1069,7 @@ void OpenFileMap(const fs::path &filename, const SString &map_namem) noexcept(fa
 {
 	// TODO: change this to start a new instance
 	SString map_name = map_namem;
-	if (! gInstance.level.Main_ConfirmQuit("open another map"))
+	if (! gInstance->level.Main_ConfirmQuit("open another map"))
 		return;
 
 
@@ -1111,7 +1110,7 @@ void OpenFileMap(const fs::path &filename, const SString &map_namem) noexcept(fa
 		return;
 	}
 
-	LoadingData loading = gInstance.loaded;
+	LoadingData loading = gInstance->loaded;
 
 	if (wad->FindLump(EUREKA_LUMP))
 	{
@@ -1136,16 +1135,19 @@ void OpenFileMap(const fs::path &filename, const SString &map_namem) noexcept(fa
 	gLog.printf("Loading Map : %s of %s\n", map_name.c_str(), wad->PathName().u8string().c_str());
 
 	// These 2 may throw, but it's safe here
-	NewDocument newdoc = gInstance.openDocument(loading, *wad, lev_num);
-	NewResources newres = loadResources(newdoc.loading, gInstance.wad);
+	NewDocument newdoc = gInstance->openDocument(loading, *wad, lev_num);
+	NewResources newres = loadResources(newdoc.loading, gInstance->wad);
 
-	gInstance.level = std::move(newdoc.doc);
-	gInstance.conf = std::move(newres.config);
-	gInstance.loaded = std::move(newres.loading);
-	gInstance.wad = std::move(newres.waddata);
-	gInstance.wad.master.ReplaceEditWad(wad);
+	gInstance->level = std::move(newdoc.doc);
+	gInstance->conf = std::move(newres.config);
+	gInstance->loaded = std::move(newres.loading);
+	gInstance->wad = std::move(newres.waddata);
+	gInstance->wad.master.ReplaceEditWad(wad);
+	
+	if(gInstance->main_win)
+		testmap::updateMenuName(gInstance->main_win->menu_bar, gInstance->loaded);
 
-	gInstance.refreshViewAfterLoad(newdoc.bad, wad.get(), map_name, true);
+	gInstance->refreshViewAfterLoad(newdoc.bad, wad.get(), map_name, true);
 }
 
 
@@ -1232,6 +1234,9 @@ void Instance::CMD_OpenMap()
 		conf = std::move(newres.config);
 		loaded = std::move(newres.loading);
 		this->wad = std::move(newres.waddata);
+		
+		if(main_win)
+			testmap::updateMenuName(main_win->menu_bar, loaded);
 
 		gLog.printf("--- DONE ---\n");
 		gLog.printf("\n");
@@ -1247,6 +1252,8 @@ void Instance::CMD_OpenMap()
 	level = std::move(newdoc.doc);
 	if(!new_resources)	// we already updated loaded with resources
 		loaded = std::move(newdoc.loading);
+	if(main_win)
+		testmap::updateMenuName(main_win->menu_bar, loaded);
 
 	refreshViewAfterLoad(newdoc.bad, wad.get(), map_name, new_resources);
 }
@@ -1512,12 +1519,12 @@ void Document::SaveThings_Hexen(Wad_file& wad) const
 		raw.type    = LE_U16(th->type);
 		raw.options = LE_U16(th->options);
 
-		raw.special = static_cast<u8_t>(th->special);
-		raw.args[0] = static_cast<u8_t>(th->arg1);
-		raw.args[1] = static_cast<u8_t>(th->arg2);
-		raw.args[2] = static_cast<u8_t>(th->arg3);
-		raw.args[3] = static_cast<u8_t>(th->arg4);
-		raw.args[4] = static_cast<u8_t>(th->arg5);
+		raw.special = static_cast<uint8_t>(th->special);
+		raw.args[0] = static_cast<uint8_t>(th->arg1);
+		raw.args[1] = static_cast<uint8_t>(th->arg2);
+		raw.args[2] = static_cast<uint8_t>(th->arg3);
+		raw.args[3] = static_cast<uint8_t>(th->arg4);
+		raw.args[4] = static_cast<uint8_t>(th->arg5);
 
 		lump.Write(&raw, sizeof(raw));
 	}
@@ -1582,13 +1589,13 @@ void Document::SaveLineDefs_Hexen(Wad_file &wad) const
 		raw.end   = LE_U16(ld->end);
 
 		raw.flags = LE_U16(ld->flags);
-		raw.type  = static_cast<u8_t>(ld->type);
+		raw.type  = static_cast<uint8_t>(ld->type);
 
-		raw.args[0] = static_cast<u8_t>(ld->tag);
-		raw.args[1] = static_cast<u8_t>(ld->arg2);
-		raw.args[2] = static_cast<u8_t>(ld->arg3);
-		raw.args[3] = static_cast<u8_t>(ld->arg4);
-		raw.args[4] = static_cast<u8_t>(ld->arg5);
+		raw.args[0] = static_cast<uint8_t>(ld->tag);
+		raw.args[1] = static_cast<uint8_t>(ld->arg2);
+		raw.args[2] = static_cast<uint8_t>(ld->arg3);
+		raw.args[3] = static_cast<uint8_t>(ld->arg4);
+		raw.args[4] = static_cast<uint8_t>(ld->arg5);
 
 		raw.right = (ld->right >= 0) ? LE_U16(ld->right) : 0xFFFF;
 		raw.left  = (ld->left  >= 0) ? LE_U16(ld->left)  : 0xFFFF;

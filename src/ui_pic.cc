@@ -138,7 +138,7 @@ void UI_Pic::GetSprite(int type, Fl_Color back_color)
 {
 	Clear();
 
-	const Img_c *img = inst.wad.getSprite(inst.conf, type, inst.loaded);
+	const Img_c *img = inst.wad.getSprite(inst.conf, type, inst.loaded, 1);
 	tl::optional<Img_c> new_img;
 
 	if (! img || img->width() < 1 || img->height() < 1)
@@ -149,14 +149,9 @@ void UI_Pic::GetSprite(int type, Fl_Color back_color)
 
 	const thingtype_t &info = inst.conf.getThingType(type);
 
-	if (info.flags & THINGDEF_INVIS)
-	{
-		new_img = img->spectrify(inst.conf);
-		img = &new_img.value();
-	}
 
 
-	u32_t back = Fl::get_color(back_color);
+	uint32_t back = Fl::get_color(back_color);
 
 	int iw = img->width();
 	int ih = img->height();
@@ -246,7 +241,7 @@ void UI_Pic::TiledImg(const Img_c *img) noexcept
 		scale = scale * 2;
 
 
-	const u32_t back = config::transparent_col;
+	const uint32_t back = config::transparent_col;
 
 
 	std::vector<uchar> buf;
