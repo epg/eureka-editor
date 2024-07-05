@@ -54,6 +54,8 @@
 #include "ui_about.h"
 #include "ui_file.h"
 
+#include "version.h"
+
 #ifndef WIN32
 #include <time.h>
 #ifndef __APPLE__
@@ -324,9 +326,8 @@ static void Determine_InstallPath(const char *argv0) noexcept(false)
 #else
 		static const fs::path prefixes[] =
 		{
+			EUREKA_INSTALL_PREFIX,
 			"/usr/local",
-			"/usr",
-			"/opt",
 		};
 
 		for (const fs::path &prefix : prefixes)

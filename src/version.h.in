@@ -7,4 +7,8 @@
 #define EUREKA_VERSION_PATCH @PROJECT_VERSION_PATCH@
 #define EUREKA_VERSION_TWEAK @PROJECT_VERSION_TWEAK@
 
+// TODO Move to separate file or rename this to reflect that it includes
+// various build parameters.
+#define EUREKA_INSTALL_PREFIX "@CMAKE_INSTALL_PREFIX@"
+
 #endif
